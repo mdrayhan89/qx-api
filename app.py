@@ -11,63 +11,43 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 
-# গ্লোবাল ভেরিয়েবল যেখানে ক্যান্ডেল ডেটা জমা থাকবে
 candles_history = {}
 
-def get_candle_color(o, c):
-    return "green" if float(c) >= float(o) else "red"
+# --- আপনার দেওয়া লেটেস্ট ডাটা ---
+AUTH_SESSION = "eeR2zS5eKQ55tLC9GZQg1BRcsi1NAT3xLjFsK1SF"
+MY_COOKIE = "_ga=GA1.1.453634495.1773337729; OTCTooltip={%22value%22:false}; sonr={%22value%22:false}; lang=en; __vid1=89f387f95a92729124e9994373142ae3; balance-visible={%22value%22:false}; tabFixed=[%22NZDCHF_otc%22%2C%22AUDCAD%22%2C%22EURJPY%22%2C%22EURGBP%22]; nas=[%22EURNZD_otc%22%2C%22USDARS_otc%22%2C%22USDNGN_otc%22%2C%22USDEGP_otc%22%2C%22USDMXN_otc%22%2C%22USDCOP_otc%22%2C%22USDBDT_otc%22%2C%22NZDJPY_otc%22%2C%22NZDUSD_otc%22%2C%22EURUSD%22%2C%22MCD_otc%22%2C%22USDINR_otc%22%2C%22NZDCAD_otc%22%2C%22PFE_otc%22%2C%22JNJ_otc%22%2C%22USDDZD_otc%22%2C%22ATOUSD_otc%22%2C%22USDJPY%22%2C%22BRLUSD_otc%22%2C%22USDPHP_otc%22%2C%22MSFT_otc%22%2C%22USDIDR_otc%22%2C%22USDPKR_otc%22%2C%22GBPJPY%22%2C%22AXP_otc%22]; activeAccount=live; z=[[%22graph%22%2C2%2C0%2C0%2C0.4633264]]; _ga_L4T5GBPFHJ=GS2.1.s1774694107$o25$g1$t1774696271$j53$l0$h0"
 
 def on_message(ws, message):
     global candles_history
-    if message == '2': # Heartbeat
+    if message == '2':
         ws.send('3')
         return
-
     if message.startswith('42'):
         try:
-            msg_data = json.loads(message[2:])
-            event = msg_data[0]
-            data = msg_data[1]
-
-            if event in ["candle", "tick"]:
-                symbol = data.get('s')
-                if symbol:
-                    if symbol not in candles_history:
-                        candles_history[symbol] = []
-                    
-                    o, h, l, c = data['o'], data['h'], data['l'], data['c']
-                    t = int(data['t'])
-                    f_time = datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S')
-
-                    candle_obj = {
-                        "pair": symbol,
-                        "open": str(o),
-                        "high": str(h),
-                        "low": str(l),
-                        "close": str(c),
-                        "color": get_candle_color(o, c),
-                        "epoch": t,
-                        "time": f_time
-                    }
-
-                    # একই ক্যান্ডেল হলে আপডেট করো, নতুন হলে অ্যাপেন্ড করো
-                    if candles_history[symbol] and candles_history[symbol][-1]['epoch'] == t:
-                        candles_history[symbol][-1] = candle_obj
-                    else:
-                        candles_history[symbol].append(candle_obj)
-                    
-                    # মেমোরি সেভ করতে লাস্ট ১০০ ক্যান্ডেল রাখো
-                    if len(candles_history[symbol]) > 100:
-                        candles_history[symbol].pop(0)
-        except:
-            pass
+            res = json.loads(message[2:])
+            if res[0] in ["candle", "tick"]:
+                data = res[1]
+                pair = data['s']
+                if pair not in candles_history: candles_history[pair] = []
+                
+                candle = {
+                    "pair": pair,
+                    "open": str(data['o']), "high": str(data['h']),
+                    "low": str(data['l']), "close": str(data['c']),
+                    "color": "green" if float(data['c']) >= float(data['o']) else "red",
+                    "epoch": data['t'],
+                    "time": datetime.fromtimestamp(data['t']).strftime('%H:%M:%S')
+                }
+                
+                if candles_history[pair] and candles_history[pair][-1]['epoch'] == data['t']:
+                    candles_history[pair][-1] = candle
+                else:
+                    candles_history[pair].append(candle)
+                
+                if len(candles_history[pair]) > 50: candles_history[pair].pop(0)
+        except: pass
 
 def run_ws():
-    # --- আপনার দেওয়া লেটেস্ট সেশন আইডি ---
-    AUTH_SESSION = "eeR2zS5eKQ55tLC9GZQg1BRcsi1NAT3xLjFsK1SF"
-    # আপনার ব্রাউজার থেকে নেওয়া ফুল কুকি এখানে আপডেট করে দিন (জরুরি)
-    MY_COOKIE = "_ga=GA1.1.453634495.1773337729; lang=en; activeAccount=live;"
-
     while True:
         try:
             ws_url = "wss://ws2.market-qx.trade/socket.io/?EIO=3&transport=websocket"
@@ -76,51 +56,31 @@ def run_ws():
                 "Origin": "https://market-qx.trade",
                 "Cookie": MY_COOKIE
             }
-            
             ws = websocket.WebSocketApp(ws_url, header=headers, on_message=on_message)
-
             def on_open(ws):
-                ws.send('40') # Handshake Start
+                ws.send('40')
                 time.sleep(1)
-                # অথোরাইজেশন মেসেজ
-                auth_payload = f'42["authorization", {{"session": "{AUTH_SESSION}", "isDemo": 0, "tournamentId": 0}}]'
-                ws.send(auth_payload)
+                auth_data = f'42["authorization", {{"session": "{AUTH_SESSION}", "isDemo": 0, "tournamentId": 0}}]'
+                ws.send(auth_data)
                 time.sleep(1)
                 ws.send('42["subscribe_all"]')
-                print("--- DARK-X-RAYHAN API: SERVER CONNECTED AND AUTHORIZED ---")
-
+                print("--- DARK-X-RAYHAN SYNC STARTED ---")
             ws.on_open = on_open
-            ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE}, ping_interval=5)
-        except Exception as e:
-            print(f"Connection lost. Reconnecting... Error: {e}")
-            time.sleep(5)
+            ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE}, ping_interval=15)
+        except: time.sleep(5)
 
 @app.route('/')
-def home():
-    return "DARK-X-RAYHAN API IS LIVE"
+def health(): return "<h1>DARK-X-RAYHAN API IS ACTIVE</h1>"
 
 @app.route('/Qx/Qx.php')
-def get_qx_data():
+def get_qx():
     pair = request.args.get('pair', 'USDBDT_otc')
     limit = request.args.get('limit', default=10, type=int)
-    
     if pair in candles_history:
-        data = list(reversed(candles_history[pair]))[:limit]
-        return jsonify({
-            "Owner": "DARK-X-RAYHAN",
-            "success": True,
-            "pair": pair,
-            "data": data
-        })
-    return jsonify({
-        "success": False, 
-        "message": "Syncing on server, please wait...",
-        "active_pairs": list(candles_history.keys())
-    }), 404
+        return jsonify({"success": True, "data": list(reversed(candles_history[pair]))[:limit]})
+    return jsonify({"success": False, "message": "Syncing... Please wait a few seconds."}), 404
 
 if __name__ == '__main__':
-    # সকেট আলাদা থ্রেডে চালানো
     threading.Thread(target=run_ws, daemon=True).start()
-    # হোস্টিং পোর্টে রান করা
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
